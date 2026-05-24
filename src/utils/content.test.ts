@@ -4,9 +4,11 @@ import { defaultContentFields, getContentPayload } from "./content";
 describe("getContentPayload", () => {
   it("builds URL payloads only for http or https URLs", () => {
     expect(getContentPayload("url", { ...defaultContentFields, url: "https://example.com" }).safe).toBe(true);
+    expect(getContentPayload("url", { ...defaultContentFields, url: "h" }).safe).toBe(false);
     expect(getContentPayload("url", { ...defaultContentFields, url: "example.com" }).warning).toBe(
-      "URL must start with http or https"
+      "Enter a full URL starting with http:// or https://."
     );
+    expect(getContentPayload("pdf", { ...defaultContentFields, pdf: "h" }).safe).toBe(false);
   });
 
   it("builds vCard contact payloads", () => {

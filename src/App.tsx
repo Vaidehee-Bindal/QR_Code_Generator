@@ -42,12 +42,12 @@ import {
   parseBatchInput,
   validateLogoFile
 } from "./utils/validation";
+import { isCompleteHttpUrl } from "./utils/validation";
 
 const DEFAULT_BATCH = [
   "https://example.com",
   "https://github.com",
   "https://youtube.com",
-  "https://linkedin.com/in/username",
   "Hello World",
   "contact@example.com"
 ].join("\n");
@@ -426,7 +426,7 @@ function CommonSettings({
             <Trash2 size={18} />
           </button>
         </div>
-        {(logoError || logoWarning) && <p className={logoError ? "warning error" : "warning"}>{logoError ?? logoWarning}</p>}
+        {(logoError || logoWarning) && <p className={logoError ? "warning error" : "warning logo-warning"}>{logoError ?? logoWarning}</p>}
       </div>
     </div>
   );
@@ -550,6 +550,9 @@ function TextInputField({
   type = "text",
   hasValidationError,
   validationWarning,
+  showError,
+  showSuccess,
+  showWarning,
   onChange
 }: {
   id: string;
@@ -559,14 +562,21 @@ function TextInputField({
   type?: string;
   hasValidationError: boolean;
   validationWarning: string | null;
+  showError?: boolean;
+  showSuccess?: boolean;
+  showWarning?: boolean;
   onChange: (value: string) => void;
 }) {
+  const effectiveError = showError ?? hasValidationError;
+  const effectiveSuccess = showSuccess ?? (Boolean(value.trim()) && !hasValidationError);
+  const effectiveWarning = showWarning ?? (Boolean(validationWarning) && !effectiveError);
+
   return (
     <>
       <label className="field-label" htmlFor={id}>
         {label}
       </label>
-      <div className={`text-field ${hasValidationError ? "has-error" : validationWarning ? "has-warning" : ""}`}>
+      <div className={`text-field ${effectiveError ? "has-error" : effectiveWarning ? "has-warning" : ""}`}>
         <Link size={22} />
         <input
           id={id}
@@ -576,7 +586,7 @@ function TextInputField({
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
         />
-        <CheckCircle2 size={22} className="valid-icon" />
+        {effectiveSuccess && <CheckCircle2 size={22} className="valid-icon" />}
       </div>
     </>
   );
@@ -600,6 +610,7 @@ function ContentFieldsForm({
   onLegacyChange: (value: string) => void;
 }) {
   if (type === "url") {
+    const urlReady = isCompleteHttpUrl(fields.url);
     return (
       <TextInputField
         id="single-input"
@@ -608,6 +619,9 @@ function ContentFieldsForm({
         placeholder="https://example.com"
         hasValidationError={hasValidationError}
         validationWarning={validationWarning}
+        showError={Boolean(fields.url.trim()) && !urlReady}
+        showSuccess={urlReady}
+        showWarning={false}
         onChange={(value) => {
           onLegacyChange(value);
           onFieldChange("url", value);
@@ -618,6 +632,7 @@ function ContentFieldsForm({
 
   if (type === "pdf" || type === "app") {
     const field = type === "pdf" ? "pdf" : "app";
+    const fieldReady = isCompleteHttpUrl(fields[field]);
     return (
       <TextInputField
         id={`${type}-input`}
@@ -626,6 +641,9 @@ function ContentFieldsForm({
         placeholder={type === "pdf" ? "https://example.com/file.pdf" : "https://apps.apple.com/app/example"}
         hasValidationError={hasValidationError}
         validationWarning={validationWarning}
+        showError={Boolean(fields[field].trim()) && !fieldReady}
+        showSuccess={fieldReady}
+        showWarning={false}
         onChange={(value) => onFieldChange(field, value)}
       />
     );
@@ -690,27 +708,53 @@ function ContentFieldsForm({
       <TextInputField id="contact-phone" label="Phone" value={fields.contactPhone} placeholder="+15551234567" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactPhone", value)} />
       <TextInputField id="contact-email" label="Email" type="email" value={fields.contactEmail} placeholder="jane@example.com" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactEmail", value)} />
       <TextInputField id="contact-company" label="Company" value={fields.contactCompany} placeholder="Company" hasValidationError={false} validationWarning={null} onChange={(value) => onFieldChange("contactCompany", value)} />
-      <TextInputField id="contact-website" label="Website" value={fields.contactWebsite} placeholder="https://example.com" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactWebsite", value)} />
+      <TextInputField
+        id="contact-website"
+        label="Website"
+        value={fields.contactWebsite}
+        placeholder="https://example.com"
+        hasValidationError={hasValidationError}
+        validationWarning={validationWarning}
+        showError={Boolean(fields.contactWebsite.trim()) && !isCompleteHttpUrl(fields.contactWebsite)}
+        showSuccess={Boolean(fields.contactWebsite.trim()) && isCompleteHttpUrl(fields.contactWebsite)}
+        showWarning={false}
+        onChange={(value) => onFieldChange("contactWebsite", value)}
+      />
     </div>
   );
 }
 
 function DownloadControls({ onExport, busy }: { onExport: (format: ExportFormat) => void; busy: boolean }) {
+  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>("png");
+
+  function selectFormat(format: ExportFormat) {
+    setSelectedFormat(format);
+  }
+
+  function triggerDownload() {
+    onExport(selectedFormat);
+  }
+
   return (
     <div className="download-block">
       <h2>Download</h2>
-      <div className="download-grid">
-        <button type="button" disabled={busy} onClick={() => onExport("png")}>
+      <p>Choose format and download your QR code.</p>
+      <div className="batch-download-row single-download-row">
+        <button className={selectedFormat === "png" ? "selected" : ""} type="button" disabled={busy} onClick={() => selectFormat("png")}>
           <Image size={22} />
           PNG
         </button>
-        <button type="button" disabled={busy} onClick={() => onExport("svg")}>
+        <button className={selectedFormat === "svg" ? "selected" : ""} type="button" disabled={busy} onClick={() => selectFormat("svg")}>
           <Sparkles size={22} />
           SVG
         </button>
-        <button type="button" disabled={busy} onClick={() => onExport("pdf")}>
+        <button className={selectedFormat === "pdf" ? "selected" : ""} type="button" disabled={busy} onClick={() => selectFormat("pdf")}>
           <File size={22} />
           PDF
+        </button>
+        <button className="zip-button download-btn" type="button" onClick={() => triggerDownload()} disabled={busy}>
+          <Download size={18} />
+          Download
         </button>
       </div>
     </div>
@@ -732,12 +776,23 @@ interface BatchPanelProps extends CommonSettingsProps {
 }
 
 function BatchPanel(props: BatchPanelProps) {
+  const pageSize = 6;
+  const [previewPage, setPreviewPage] = useState(0);
   const itemReadiness = useMemo(
     () => new Map(props.items.map((item) => [item.id, getQrGenerationReadiness(item.value)])),
     [props.items]
   );
   const readyItems = useMemo(() => getReadyBatchItems(props.items), [props.items]);
+  const totalPages = Math.max(1, Math.ceil(props.items.length / pageSize));
+  const visibleItems = useMemo(
+    () => props.items.slice(previewPage * pageSize, previewPage * pageSize + pageSize),
+    [props.items, previewPage]
+  );
   const allSelected = readyItems.length > 0 && readyItems.every((item) => props.selectedIds.has(item.id));
+
+  useEffect(() => {
+    setPreviewPage((current) => Math.min(current, totalPages - 1));
+  }, [totalPages]);
 
   function toggleItem(id: string) {
     props.setSelectedIds((current) => {
@@ -758,9 +813,10 @@ function BatchPanel(props: BatchPanelProps) {
         </div>
         <textarea
           id="batch-input"
+          className="batch-input"
           value={props.value}
           onChange={(event) => props.onChange(event.target.value)}
-          rows={7}
+          rows={5}
           maxLength={MAX_INPUT_LENGTH * MAX_BATCH_ITEMS}
         />
         <p className="hint split-hint">
@@ -786,6 +842,17 @@ function BatchPanel(props: BatchPanelProps) {
         <div className="panel-title">
           <h2>Preview ({props.items.length})</h2>
           <div className="batch-actions">
+            <div className="preview-pager" aria-label="Batch preview page controls">
+              <button type="button" onClick={() => setPreviewPage((current) => Math.max(0, current - 1))} disabled={previewPage === 0}>
+                Prev
+              </button>
+              <span>
+                {previewPage + 1} / {totalPages}
+              </span>
+              <button type="button" onClick={() => setPreviewPage((current) => Math.min(totalPages - 1, current + 1))} disabled={previewPage >= totalPages - 1}>
+                Next
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => props.setSelectedIds(allSelected ? new Set() : new Set(readyItems.map((item) => item.id)))}
@@ -800,9 +867,10 @@ function BatchPanel(props: BatchPanelProps) {
         </div>
 
         <div className="batch-card-grid">
-          {props.items.map((item, index) => {
+          {visibleItems.map((item, index) => {
             const readiness = itemReadiness.get(item.id);
             const ready = Boolean(readiness?.ready);
+            const itemNumber = previewPage * pageSize + index + 1;
 
             return (
               <button
@@ -812,8 +880,8 @@ function BatchPanel(props: BatchPanelProps) {
                 onClick={() => ready && toggleItem(item.id)}
                 title={readiness?.message ?? item.value}
               >
-                <span className="tile-index">{index + 1}</span>
-                {props.qrMap[item.id] ? <img src={props.qrMap[item.id]} alt={`QR code ${index + 1}`} /> : <div className="tile-empty" />}
+                <span className="tile-index">{itemNumber}</span>
+                {props.qrMap[item.id] ? <img src={props.qrMap[item.id]} alt={`QR code ${itemNumber}`} /> : <div className="tile-empty" />}
                 <span className="tile-text">
                   <span className="tile-label">{ready ? item.value : readiness?.message}</span>
                   <Copy size={16} />

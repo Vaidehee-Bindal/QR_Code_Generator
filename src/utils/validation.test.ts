@@ -29,13 +29,13 @@ describe("validateQrInput", () => {
   it("rejects URL-like values without http or https", () => {
     const result = validateQrInput("example.com/path");
     expect(result.safe).toBe(false);
-    expect(result.warning).toBe("URL must start with http or https");
+    expect(result.warning).toBe("Enter a full URL starting with http:// or https://.");
   });
 
   it("rejects non-http URL schemes", () => {
     const result = validateQrInput("ftp://example.com");
     expect(result.safe).toBe(false);
-    expect(result.warning).toBe("URL must start with http or https");
+    expect(result.warning).toBe("Enter a full URL starting with http:// or https://.");
   });
 });
 
@@ -48,6 +48,8 @@ describe("parseBatchInput", () => {
 
 describe("getQrGenerationReadiness", () => {
   it("waits for incomplete http URLs", () => {
+    expect(getQrGenerationReadiness("https").ready).toBe(false);
+    expect(getQrGenerationReadiness("https:").ready).toBe(false);
     const result = getQrGenerationReadiness("https://exa");
     expect(result.ready).toBe(false);
     expect(result.message).toContain("complete URL");

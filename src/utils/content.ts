@@ -1,7 +1,8 @@
 import type { ContentFields, ContentType, ValidationResult } from "../types";
-import { validateQrInput } from "./validation";
+import { isCompleteHttpUrl, validateQrInput } from "./validation";
 
-const REQUIRED_URL_MESSAGE = "URL must start with http or https";
+const REQUIRED_URL_MESSAGE = "Enter a full URL starting with http:// or https://.";
+const URL_STUB_MESSAGE = "Keep typing to complete the URL.";
 
 export const defaultContentFields: ContentFields = {
   url: "https://example.com",
@@ -28,7 +29,9 @@ function result(safe: boolean, normalized: string, warning: string | null): Vali
 function validateHttpUrl(value: string, requiredLabel = "URL"): ValidationResult {
   const validation = validateQrInput(value);
   if (!validation.normalized) return result(false, "", `${requiredLabel} is required.`);
-  if (!/^https?:\/\//i.test(validation.normalized)) return result(false, validation.normalized, REQUIRED_URL_MESSAGE);
+  if (!isCompleteHttpUrl(validation.normalized)) {
+    return result(false, validation.normalized, validation.warning ?? URL_STUB_MESSAGE);
+  }
   return validation;
 }
 

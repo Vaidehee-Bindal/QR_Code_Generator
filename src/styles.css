@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   --bg: #f5f7fb;
-  --surface: #ffffff;
-  --surface-strong: #ffffff;
+  --surface: #fffff9;
+  --surface-strong: #fffff9;
   --text: #09111f;
   --muted: #5f6a7d;
   --line: #dde3eb;
@@ -318,9 +318,16 @@ h1 {
 }
 
 .valid-icon,
-.download-grid button:first-child,
+.download-grid button.selected,
 .batch-download-row button.selected {
   color: var(--primary);
+}
+
+.valid-icon {
+  fill: var(--primary);
+  color: #ffffff;
+  stroke: currentColor;
+  stroke-width: 2.4;
 }
 
 .hint,
@@ -336,6 +343,10 @@ h1 {
 
 .warning.error {
   color: var(--danger);
+}
+
+.warning.logo-warning {
+  white-space: nowrap;
 }
 
 .settings {
@@ -381,7 +392,7 @@ h1 {
 }
 
 .segmented button.selected,
-.download-grid button:first-child,
+.download-grid button.selected,
 .batch-download-row button.selected {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -528,6 +539,11 @@ h1 {
   margin-top: 24px;
 }
 
+.download-block p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
 .download-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -561,6 +577,10 @@ textarea.has-error {
   border-color: var(--danger);
 }
 
+textarea.batch-input {
+  min-height: 200px;
+}
+
 .split-hint {
   display: flex;
   justify-content: space-between;
@@ -568,7 +588,35 @@ textarea.has-error {
 }
 
 .batch-actions {
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.preview-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.preview-pager button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.preview-pager button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .batch-actions button {
@@ -683,6 +731,17 @@ textarea.has-error {
   grid-template-columns: repeat(3, 1fr) 1.5fr;
   gap: 12px;
   margin-top: 18px;
+}
+
+.single-download-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 1fr;
+}
+
+.download-btn {
+  justify-self: stretch;
+  background: linear-gradient(180deg, #34a653, var(--primary-strong));
+  color: #ffffff;
+  border-color: transparent;
 }
 
 .zip-button {

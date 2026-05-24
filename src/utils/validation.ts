@@ -6,7 +6,7 @@ export const MAX_LOGO_BYTES = 1024 * 1024;
 
 const BLOCKED_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "file:"]);
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/svg+xml"]);
-const URL_PROTOCOL_ERROR = "URL must start with http or https";
+const URL_PROTOCOL_ERROR = "Enter a full URL starting with http:// or https://.";
 
 export interface QrReadiness {
   ready: boolean;
@@ -75,7 +75,7 @@ export function validateQrInput(rawValue: string): ValidationResult {
   return { safe: true, warning: null, normalized };
 }
 
-function isCompleteHttpUrl(value: string): boolean {
+export function isCompleteHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
     const hostParts = parsed.hostname.split(".").filter(Boolean);
@@ -90,8 +90,7 @@ function isCompleteHttpUrl(value: string): boolean {
 }
 
 function looksLikeIncompleteUrl(value: string): boolean {
-  if (/^https?:\/\//i.test(value)) return !isCompleteHttpUrl(value);
-  return false;
+  return /^https?/i.test(value) && !isCompleteHttpUrl(value);
 }
 
 export function getQrGenerationReadiness(rawValue: string): QrReadiness {

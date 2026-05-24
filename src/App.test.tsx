@@ -29,6 +29,6 @@ describe("App", () => {
 
     await user.clear(screen.getByLabelText(/enter url/i));
     await user.type(screen.getByLabelText(/enter url/i), "example.com");
-    expect(await screen.findByText(/url must start with http or https/i)).toBeInTheDocument();
+    expect(await screen.findByText(/enter a full url starting with http:\/\/ or https:\/\./i)).toBeInTheDocument();
   });
 });
