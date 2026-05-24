@@ -244,8 +244,30 @@ function App() {
   }
 
   function resetCurrentMode() {
-    if (mode === "single") setSingleInput("");
-    else {
+    if (mode === "single") {
+      setContentFields({
+        url: "",
+        pdf: "",
+        contactName: "",
+        contactPhone: "",
+        contactEmail: "",
+        contactCompany: "",
+        contactWebsite: "",
+        text: "",
+        app: "",
+        smsPhone: "",
+        smsMessage: "",
+        emailTo: "",
+        emailSubject: "",
+        emailBody: "",
+        phone: ""
+      });
+      setSingleInput("");
+      setSingleQr("");
+      return;
+    }
+
+    {
       setBatchInput("");
       setBatchQrs({});
       setSelectedIds(new Set());
