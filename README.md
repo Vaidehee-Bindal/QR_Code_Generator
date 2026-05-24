@@ -5,6 +5,9 @@ A modern and feature-rich QR Code Generator built using React, TypeScript, and V
 # Live Demo
 Try it here - https://multipurpose-qr-code-generator.vercel.app/
 
+# Video Demo
+https://github.com/user-attachments/assets/09724c02-3af0-4932-a4cc-d6e7d5db4992
+
 ## Features
 
 ### QR Code Types Supported
