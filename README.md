@@ -2,6 +2,9 @@
 
 A modern and feature-rich QR Code Generator built using React, TypeScript, and Vite. Generate QR codes for multiple content types, export them in different formats, and create batch QR codes with support for up to 100 entries.
 
+# Live Demo
+Try it here - https://multipurpose-qr-code-generator.vercel.app/
+
 ## Features
 
 ### QR Code Types Supported
