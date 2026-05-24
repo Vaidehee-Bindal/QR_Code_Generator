@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseBatchInput, safeFilename, validateLogoFile, validateQrInput } from "./validation";
+import {
+  getQrGenerationReadiness,
+  getReadyBatchItems,
+  parseBatchInput,
+  safeFilename,
+  validateLogoFile,
+  validateQrInput
+} from "./validation";
 
 function makeFile(name: string, type: string, size = 128): File {
   return new File([new Uint8Array(size)], name, { type });
@@ -19,10 +26,16 @@ describe("validateQrInput", () => {
     });
   });
 
-  it("warns for URL-like values without protocol", () => {
+  it("rejects URL-like values without http or https", () => {
     const result = validateQrInput("example.com/path");
-    expect(result.safe).toBe(true);
-    expect(result.warning).toContain("protocol");
+    expect(result.safe).toBe(false);
+    expect(result.warning).toBe("URL must start with http or https");
+  });
+
+  it("rejects non-http URL schemes", () => {
+    const result = validateQrInput("ftp://example.com");
+    expect(result.safe).toBe(false);
+    expect(result.warning).toBe("URL must start with http or https");
   });
 });
 
@@ -30,6 +43,24 @@ describe("parseBatchInput", () => {
   it("trims empty rows and caps at 100 items", () => {
     const input = Array.from({ length: 105 }, (_, index) => `item-${index}`).join("\n");
     expect(parseBatchInput(`\n${input}\n`)).toHaveLength(100);
+  });
+});
+
+describe("getQrGenerationReadiness", () => {
+  it("waits for incomplete http URLs", () => {
+    const result = getQrGenerationReadiness("https://exa");
+    expect(result.ready).toBe(false);
+    expect(result.message).toContain("complete URL");
+  });
+
+  it("allows complete URLs and plain text", () => {
+    expect(getQrGenerationReadiness("https://example.com").ready).toBe(true);
+    expect(getQrGenerationReadiness("Hello World").ready).toBe(true);
+  });
+
+  it("filters batch items to only ready values", () => {
+    const items = parseBatchInput("https://exa\nexample.com\nhttps://example.com\nHello World");
+    expect(getReadyBatchItems(items).map((item) => item.value)).toEqual(["https://example.com", "Hello World"]);
   });
 });
 

@@ -8,7 +8,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.getByLabelText(/enter text \/ url/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/enter url/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /batch/i }));
     expect(screen.getByLabelText(/input/i)).toBeInTheDocument();
     expect(screen.getByText(/Preview \(6\)/i)).toBeInTheDocument();
@@ -23,12 +23,12 @@ describe("App", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
-  it("shows warnings for suspicious input", async () => {
+  it("shows an error for URL-like input without http or https", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.clear(screen.getByLabelText(/enter text \/ url/i));
-    await user.type(screen.getByLabelText(/enter text \/ url/i), "example.com");
-    expect(await screen.findByText(/without a protocol/i)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText(/enter url/i));
+    await user.type(screen.getByLabelText(/enter url/i), "example.com");
+    expect(await screen.findByText(/url must start with http or https/i)).toBeInTheDocument();
   });
 });

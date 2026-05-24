@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
-  ChevronDown,
   Clipboard,
   Copy,
   Download,
   File,
+  Contact,
+  Grid3X3,
   Image,
   Layers,
   Link,
+  Mail,
+  MessageSquare,
   Moon,
   Palette,
+  Phone,
   QrCode,
   RefreshCw,
   Shield,
@@ -20,17 +24,24 @@ import {
   UserRound,
   Zap
 } from "lucide-react";
-import type { BatchItem, ErrorLevel, ExportFormat, LogoAsset, Mode, QrOptions, QrSize, Theme } from "./types";
+import type { BatchItem, ContentFields, ContentType, ErrorLevel, ExportFormat, LogoAsset, Mode, QrOptions, QrSize, Theme } from "./types";
 import {
   copyImageToClipboard,
-  copyToClipboard,
   createBatchZip,
   createExportBlob,
   downloadBlob,
   generatePngDataUrl,
   safeFilename
 } from "./utils/qr";
-import { MAX_BATCH_ITEMS, MAX_INPUT_LENGTH, parseBatchInput, validateLogoFile, validateQrInput } from "./utils/validation";
+import { defaultContentFields, getContentPayload } from "./utils/content";
+import {
+  MAX_BATCH_ITEMS,
+  MAX_INPUT_LENGTH,
+  getQrGenerationReadiness,
+  getReadyBatchItems,
+  parseBatchInput,
+  validateLogoFile
+} from "./utils/validation";
 
 const DEFAULT_BATCH = [
   "https://example.com",
@@ -49,9 +60,36 @@ const errorLevels: Array<{ value: ErrorLevel; label: string; detail: string }> =
   { value: "H", label: "H", detail: "30%" }
 ];
 
+const contentTypes: Array<{ type: ContentType; label: string; icon: typeof Link }> = [
+  { type: "url", label: "URL", icon: Link },
+  { type: "pdf", label: "PDF", icon: File },
+  { type: "contact", label: "Contact", icon: Contact },
+  { type: "text", label: "Plain Text", icon: Clipboard },
+  { type: "app", label: "App", icon: Grid3X3 },
+  { type: "sms", label: "SMS", icon: MessageSquare },
+  { type: "email", label: "Email", icon: Mail },
+  { type: "phone", label: "Phone", icon: Phone }
+];
+
+const TYPING_DEBOUNCE_MS = 1400;
+const PASTE_DEBOUNCE_MS = 120;
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debouncedValue;
+}
+
 function App() {
   const [mode, setMode] = useState<Mode>("single");
   const [theme, setTheme] = useState<Theme>("light");
+  const [contentType, setContentType] = useState<ContentType>("url");
+  const [contentFields, setContentFields] = useState<ContentFields>(defaultContentFields);
   const [singleInput, setSingleInput] = useState("https://example.com");
   const [batchInput, setBatchInput] = useState(DEFAULT_BATCH);
   const [options, setOptions] = useState<QrOptions>({ size: 256, errorLevel: "M" });
@@ -61,16 +99,41 @@ function App() {
   const [batchQrs, setBatchQrs] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [format, setFormat] = useState<ExportFormat>("png");
-  const [status, setStatus] = useState("Ready");
   const [busy, setBusy] = useState(false);
+  const [singleDebounceMs, setSingleDebounceMs] = useState(TYPING_DEBOUNCE_MS);
+  const [batchDebounceMs, setBatchDebounceMs] = useState(TYPING_DEBOUNCE_MS);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const singleValidation = useMemo(() => validateQrInput(singleInput), [singleInput]);
+  const activeContentValue = useMemo(() => JSON.stringify({ contentType, contentFields }), [contentType, contentFields]);
+  const debouncedSingleInput = useDebouncedValue(activeContentValue, singleDebounceMs);
+  const debouncedBatchInput = useDebouncedValue(batchInput, batchDebounceMs);
+  const singleReadiness = useMemo(() => {
+    const payload = getContentPayload(contentType, contentFields);
+    if (!payload.safe) return { ready: false, validation: payload, message: payload.warning };
+    if (contentType === "url" || contentType === "pdf" || contentType === "app") {
+      return getQrGenerationReadiness(payload.normalized);
+    }
+    return { ready: Boolean(payload.normalized), validation: payload, message: payload.warning };
+  }, [contentType, contentFields]);
+  const debouncedSingleReadiness = useMemo(
+    () => {
+      const parsed = JSON.parse(debouncedSingleInput) as { contentType: ContentType; contentFields: ContentFields };
+      const payload = getContentPayload(parsed.contentType, parsed.contentFields);
+      if (!payload.safe) return { ready: false, validation: payload, message: payload.warning };
+      if (parsed.contentType === "url" || parsed.contentType === "pdf" || parsed.contentType === "app") {
+        return getQrGenerationReadiness(payload.normalized);
+      }
+      return { ready: Boolean(payload.normalized), validation: payload, message: payload.warning };
+    },
+    [debouncedSingleInput]
+  );
   const batchItems = useMemo(() => parseBatchInput(batchInput), [batchInput]);
-  const safeBatchItems = useMemo(() => batchItems.filter((item) => item.validation.safe), [batchItems]);
+  const debouncedBatchItems = useMemo(() => parseBatchInput(debouncedBatchInput), [debouncedBatchInput]);
+  const readyBatchItems = useMemo(() => getReadyBatchItems(debouncedBatchItems), [debouncedBatchItems]);
+  const exportableBatchItems = useMemo(() => getReadyBatchItems(batchItems), [batchItems]);
   const selectedBatchItems = useMemo(
-    () => safeBatchItems.filter((item) => selectedIds.has(item.id)),
-    [safeBatchItems, selectedIds]
+    () => exportableBatchItems.filter((item) => selectedIds.has(item.id)),
+    [exportableBatchItems, selectedIds]
   );
 
   useEffect(() => {
@@ -79,44 +142,42 @@ function App() {
 
   useEffect(() => {
     const timer = window.setTimeout(async () => {
-      if (!singleValidation.safe) {
+      if (!debouncedSingleReadiness.ready) {
         setSingleQr("");
-        setStatus(singleValidation.warning ?? "Input is not safe to generate.");
         return;
       }
 
       try {
-        setSingleQr(await generatePngDataUrl(singleValidation.normalized, options, logo));
-        setStatus(singleValidation.warning ?? "Live preview updated");
+        setSingleQr(await generatePngDataUrl(debouncedSingleReadiness.validation.normalized, options, logo));
       } catch {
-        setStatus("Unable to generate this QR code.");
+        setSingleQr("");
       }
-    }, 250);
+    }, 50);
 
     return () => window.clearTimeout(timer);
-  }, [singleValidation, options, logo]);
+  }, [debouncedSingleReadiness, options, logo]);
 
   useEffect(() => {
     if (mode !== "batch") return;
 
     const timer = window.setTimeout(async () => {
       const entries = await Promise.all(
-        safeBatchItems.map(async (item) => [item.id, await generatePngDataUrl(item.value, options, logo)] as const)
+        readyBatchItems.map(async (item) => [item.id, await generatePngDataUrl(item.value, options, logo)] as const)
       );
       setBatchQrs(Object.fromEntries(entries));
       setSelectedIds((current) => {
         const next = new Set<string>();
-        const safeIds = new Set(safeBatchItems.map((item) => item.id));
+        const readyIds = new Set(readyBatchItems.map((item) => item.id));
         current.forEach((id) => {
-          if (safeIds.has(id)) next.add(id);
+          if (readyIds.has(id)) next.add(id);
         });
-        if (next.size === 0) safeBatchItems.forEach((item) => next.add(item.id));
+        if (next.size === 0) readyBatchItems.forEach((item) => next.add(item.id));
         return next;
       });
-    }, 250);
+    }, 50);
 
     return () => window.clearTimeout(timer);
-  }, [mode, safeBatchItems, options, logo]);
+  }, [mode, readyBatchItems, options, logo]);
 
   async function onLogoChange(file?: File) {
     setLogoError(null);
@@ -139,31 +200,44 @@ function App() {
     if (options.errorLevel === "L") setOptions((current) => ({ ...current, errorLevel: "M" }));
   }
 
+  function updateSingleInput(nextValue: string) {
+    const delta = Math.abs(nextValue.length - singleInput.length);
+    setSingleDebounceMs(delta > 3 ? PASTE_DEBOUNCE_MS : TYPING_DEBOUNCE_MS);
+    setSingleInput(nextValue);
+  }
+
+  function updateBatchInput(nextValue: string) {
+    const delta = Math.abs(nextValue.length - batchInput.length);
+    setBatchDebounceMs(delta > 3 ? PASTE_DEBOUNCE_MS : TYPING_DEBOUNCE_MS);
+    setBatchInput(nextValue);
+  }
+
+  function updateContentField<K extends keyof ContentFields>(field: K, value: ContentFields[K]) {
+    const previousValue = String(contentFields[field] ?? "");
+    const delta = Math.abs(String(value).length - previousValue.length);
+    setSingleDebounceMs(delta > 3 ? PASTE_DEBOUNCE_MS : TYPING_DEBOUNCE_MS);
+    setContentFields((current) => ({ ...current, [field]: value }));
+  }
+
   async function exportSingle(nextFormat: ExportFormat) {
-    if (!singleValidation.safe) return;
+    if (!singleReadiness.ready) return;
     setBusy(true);
     try {
-      const blob = await createExportBlob(singleValidation.normalized, nextFormat, options, logo);
+      const blob = await createExportBlob(singleReadiness.validation.normalized, nextFormat, options, logo);
       const extension = nextFormat;
-      downloadBlob(blob, `${safeFilename(singleValidation.normalized)}.${extension}`);
-      setStatus(
-        nextFormat === "svg" && logo
-          ? "Downloaded SVG without logo overlay"
-          : `Downloaded ${extension.toUpperCase()}`
-      );
+      downloadBlob(blob, `${safeFilename(singleReadiness.validation.normalized)}.${extension}`);
     } finally {
       setBusy(false);
     }
   }
 
   async function exportBatchZip() {
-    const items = selectedBatchItems.length ? selectedBatchItems : safeBatchItems;
+    const items = selectedBatchItems.length ? selectedBatchItems : exportableBatchItems;
     if (!items.length) return;
     setBusy(true);
     try {
       const blob = await createBatchZip(items, format, options, logo);
       downloadBlob(blob, "qr-codes.zip");
-      setStatus(`Downloaded ${items.length} QR codes`);
     } finally {
       setBusy(false);
     }
@@ -176,10 +250,9 @@ function App() {
       setBatchQrs({});
       setSelectedIds(new Set());
     }
-    setStatus("Reset complete");
   }
 
-  const warning = mode === "single" ? singleValidation.warning : null;
+  const warning = mode === "single" ? singleReadiness.message : null;
   const logoWarning = logo && (options.errorLevel === "L" || options.errorLevel === "M")
     ? "Logo overlays work best with Q or H error correction."
     : null;
@@ -223,7 +296,13 @@ function App() {
         {mode === "single" ? (
           <SinglePanel
             value={singleInput}
-            onChange={setSingleInput}
+            onChange={updateSingleInput}
+            contentType={contentType}
+            contentFields={contentFields}
+            contentTypes={contentTypes}
+            onContentTypeChange={setContentType}
+            onContentFieldChange={updateContentField}
+            hasValidationError={!singleReadiness.validation.safe}
             validationWarning={warning}
             qrDataUrl={singleQr}
             options={options}
@@ -236,15 +315,13 @@ function App() {
             fileInputRef={fileInputRef}
             onReset={resetCurrentMode}
             onExport={exportSingle}
-            onCopyInput={() => copyToClipboard(singleValidation.normalized)}
-            onCopyImage={() => singleQr && copyImageToClipboard(singleQr)}
+            onCopyImage={() => singleQr ? copyImageToClipboard(singleQr) : Promise.resolve()}
             busy={busy}
-            status={status}
           />
         ) : (
           <BatchPanel
             value={batchInput}
-            onChange={setBatchInput}
+            onChange={updateBatchInput}
             items={batchItems}
             qrMap={batchQrs}
             options={options}
@@ -358,35 +435,48 @@ function CommonSettings({
 interface SinglePanelProps extends CommonSettingsProps {
   value: string;
   onChange: (value: string) => void;
+  contentType: ContentType;
+  contentFields: ContentFields;
+  contentTypes: Array<{ type: ContentType; label: string; icon: typeof Link }>;
+  onContentTypeChange: (type: ContentType) => void;
+  onContentFieldChange: <K extends keyof ContentFields>(field: K, value: ContentFields[K]) => void;
+  hasValidationError: boolean;
   validationWarning: string | null;
   qrDataUrl: string;
   onReset: () => void;
   onExport: (format: ExportFormat) => void;
-  onCopyInput: () => void;
-  onCopyImage: () => void;
+  onCopyImage: () => Promise<void>;
   busy: boolean;
-  status: string;
 }
 
 function SinglePanel(props: SinglePanelProps) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyImage() {
+    if (!props.qrDataUrl) return;
+    await props.onCopyImage();
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
   return (
     <div className="content-grid single-grid">
       <section className="form-panel" aria-label="Single QR generator">
-        <label className="field-label" htmlFor="single-input">
-          Enter Text / URL
-        </label>
-        <div className={`text-field ${props.validationWarning ? "has-warning" : ""}`}>
-          <Link size={22} />
-          <input
-            id="single-input"
-            maxLength={MAX_INPUT_LENGTH}
-            value={props.value}
-            onChange={(event) => props.onChange(event.target.value)}
-            placeholder="https://example.com"
-          />
-          <CheckCircle2 size={22} className="valid-icon" />
-        </div>
-        <p className={props.validationWarning ? "hint warning" : "hint"}>
+        <ContentTypePicker
+          activeType={props.contentType}
+          contentTypes={props.contentTypes}
+          onChange={props.onContentTypeChange}
+        />
+        <ContentFieldsForm
+          type={props.contentType}
+          fields={props.contentFields}
+          hasValidationError={props.hasValidationError}
+          validationWarning={props.validationWarning}
+          onFieldChange={props.onContentFieldChange}
+          legacyValue={props.value}
+          onLegacyChange={props.onChange}
+        />
+        <p className={props.hasValidationError ? "hint warning error" : props.validationWarning ? "hint warning" : "hint"}>
           {props.validationWarning ?? "Enter any text or URL to generate a QR code."}
         </p>
 
@@ -407,27 +497,200 @@ function SinglePanel(props: SinglePanelProps) {
       <aside className="preview-card" aria-label="QR Code Preview">
         <div className="panel-title">
           <h2>QR Code Preview</h2>
-          <span className="live-badge">
-            <span />
-            Live
-          </span>
         </div>
         <div className="qr-frame">
           {props.qrDataUrl ? <img src={props.qrDataUrl} alt="Generated QR code" /> : <div className="empty">No QR</div>}
         </div>
-        <button className="wide-button" type="button" onClick={props.onCopyImage} disabled={!props.qrDataUrl}>
+        <button
+          className={`wide-button copy-button ${copied ? "copied" : ""}`}
+          type="button"
+          onClick={handleCopyImage}
+          disabled={!props.qrDataUrl}
+        >
           <Copy size={22} />
-          Copy to Clipboard
-        </button>
-        <button className="ghost-link" type="button" onClick={props.onCopyInput}>
-          <Clipboard size={17} />
-          Copy input text
+          {copied ? "Copied!" : "Copy to Clipboard"}
         </button>
         <DownloadControls onExport={props.onExport} busy={props.busy} />
-        <p className="status" role="status">
-          {props.status}
-        </p>
       </aside>
+    </div>
+  );
+}
+
+function ContentTypePicker({
+  activeType,
+  contentTypes,
+  onChange
+}: {
+  activeType: ContentType;
+  contentTypes: Array<{ type: ContentType; label: string; icon: typeof Link }>;
+  onChange: (type: ContentType) => void;
+}) {
+  return (
+    <div className="content-type-strip" aria-label="QR content type">
+      {contentTypes.map(({ type, label, icon: Icon }) => (
+        <button
+          className={activeType === type ? "active" : ""}
+          type="button"
+          key={type}
+          onClick={() => onChange(type)}
+        >
+          <Icon size={24} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TextInputField({
+  id,
+  label,
+  value,
+  placeholder,
+  type = "text",
+  hasValidationError,
+  validationWarning,
+  onChange
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  type?: string;
+  hasValidationError: boolean;
+  validationWarning: string | null;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <>
+      <label className="field-label" htmlFor={id}>
+        {label}
+      </label>
+      <div className={`text-field ${hasValidationError ? "has-error" : validationWarning ? "has-warning" : ""}`}>
+        <Link size={22} />
+        <input
+          id={id}
+          type={type}
+          maxLength={MAX_INPUT_LENGTH}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+        />
+        <CheckCircle2 size={22} className="valid-icon" />
+      </div>
+    </>
+  );
+}
+
+function ContentFieldsForm({
+  type,
+  fields,
+  hasValidationError,
+  validationWarning,
+  onFieldChange,
+  legacyValue,
+  onLegacyChange
+}: {
+  type: ContentType;
+  fields: ContentFields;
+  hasValidationError: boolean;
+  validationWarning: string | null;
+  onFieldChange: <K extends keyof ContentFields>(field: K, value: ContentFields[K]) => void;
+  legacyValue: string;
+  onLegacyChange: (value: string) => void;
+}) {
+  if (type === "url") {
+    return (
+      <TextInputField
+        id="single-input"
+        label="Enter URL"
+        value={fields.url}
+        placeholder="https://example.com"
+        hasValidationError={hasValidationError}
+        validationWarning={validationWarning}
+        onChange={(value) => {
+          onLegacyChange(value);
+          onFieldChange("url", value);
+        }}
+      />
+    );
+  }
+
+  if (type === "pdf" || type === "app") {
+    const field = type === "pdf" ? "pdf" : "app";
+    return (
+      <TextInputField
+        id={`${type}-input`}
+        label={type === "pdf" ? "Enter PDF URL" : "Enter App URL"}
+        value={fields[field]}
+        placeholder={type === "pdf" ? "https://example.com/file.pdf" : "https://apps.apple.com/app/example"}
+        hasValidationError={hasValidationError}
+        validationWarning={validationWarning}
+        onChange={(value) => onFieldChange(field, value)}
+      />
+    );
+  }
+
+  if (type === "text") {
+    return (
+      <>
+        <label className="field-label" htmlFor="plain-text-input">
+          Enter Plain Text
+        </label>
+        <textarea
+          id="plain-text-input"
+          className={hasValidationError ? "has-error" : ""}
+          value={fields.text || legacyValue}
+          onChange={(event) => onFieldChange("text", event.target.value)}
+          rows={5}
+          maxLength={MAX_INPUT_LENGTH}
+          placeholder="Hello World"
+        />
+      </>
+    );
+  }
+
+  if (type === "sms") {
+    return (
+      <div className="field-grid">
+        <TextInputField id="sms-phone" label="Phone Number" value={fields.smsPhone} placeholder="+15551234567" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("smsPhone", value)} />
+        <TextInputField id="sms-message" label="Message" value={fields.smsMessage} placeholder="Your message" hasValidationError={false} validationWarning={null} onChange={(value) => onFieldChange("smsMessage", value)} />
+      </div>
+    );
+  }
+
+  if (type === "email") {
+    return (
+      <div className="field-grid">
+        <TextInputField id="email-to" label="Email Address" type="email" value={fields.emailTo} placeholder="contact@example.com" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("emailTo", value)} />
+        <TextInputField id="email-subject" label="Subject" value={fields.emailSubject} placeholder="Subject" hasValidationError={false} validationWarning={null} onChange={(value) => onFieldChange("emailSubject", value)} />
+        <label className="field-label" htmlFor="email-body">Body</label>
+        <textarea id="email-body" value={fields.emailBody} onChange={(event) => onFieldChange("emailBody", event.target.value)} rows={4} placeholder="Email body" />
+      </div>
+    );
+  }
+
+  if (type === "phone") {
+    return (
+      <TextInputField
+        id="phone-input"
+        label="Phone Number"
+        value={fields.phone}
+        placeholder="+15551234567"
+        hasValidationError={hasValidationError}
+        validationWarning={validationWarning}
+        onChange={(value) => onFieldChange("phone", value)}
+      />
+    );
+  }
+
+  return (
+    <div className="field-grid two-columns">
+      <TextInputField id="contact-name" label="Name" value={fields.contactName} placeholder="Jane Doe" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactName", value)} />
+      <TextInputField id="contact-phone" label="Phone" value={fields.contactPhone} placeholder="+15551234567" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactPhone", value)} />
+      <TextInputField id="contact-email" label="Email" type="email" value={fields.contactEmail} placeholder="jane@example.com" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactEmail", value)} />
+      <TextInputField id="contact-company" label="Company" value={fields.contactCompany} placeholder="Company" hasValidationError={false} validationWarning={null} onChange={(value) => onFieldChange("contactCompany", value)} />
+      <TextInputField id="contact-website" label="Website" value={fields.contactWebsite} placeholder="https://example.com" hasValidationError={hasValidationError} validationWarning={validationWarning} onChange={(value) => onFieldChange("contactWebsite", value)} />
     </div>
   );
 }
@@ -450,10 +713,6 @@ function DownloadControls({ onExport, busy }: { onExport: (format: ExportFormat)
           PDF
         </button>
       </div>
-      <button className="wide-button muted" type="button">
-        More Options
-        <ChevronDown size={20} />
-      </button>
     </div>
   );
 }
@@ -473,8 +732,12 @@ interface BatchPanelProps extends CommonSettingsProps {
 }
 
 function BatchPanel(props: BatchPanelProps) {
-  const safeItems = props.items.filter((item) => item.validation.safe);
-  const allSelected = safeItems.length > 0 && safeItems.every((item) => props.selectedIds.has(item.id));
+  const itemReadiness = useMemo(
+    () => new Map(props.items.map((item) => [item.id, getQrGenerationReadiness(item.value)])),
+    [props.items]
+  );
+  const readyItems = useMemo(() => getReadyBatchItems(props.items), [props.items]);
+  const allSelected = readyItems.length > 0 && readyItems.every((item) => props.selectedIds.has(item.id));
 
   function toggleItem(id: string) {
     props.setSelectedIds((current) => {
@@ -508,9 +771,9 @@ function BatchPanel(props: BatchPanelProps) {
         <CommonSettings {...props} compact />
 
         <div className="action-row">
-          <button className="primary-action" type="button" disabled={!safeItems.length || props.busy}>
+          <button className="primary-action" type="button" disabled={!readyItems.length || props.busy}>
             <Layers size={22} />
-            Generate {safeItems.length} QR Codes
+            Generate {readyItems.length} QR Codes
           </button>
           <button className="secondary-action" type="button" onClick={props.onReset}>
             <RefreshCw size={24} />
@@ -525,7 +788,7 @@ function BatchPanel(props: BatchPanelProps) {
           <div className="batch-actions">
             <button
               type="button"
-              onClick={() => props.setSelectedIds(allSelected ? new Set() : new Set(safeItems.map((item) => item.id)))}
+              onClick={() => props.setSelectedIds(allSelected ? new Set() : new Set(readyItems.map((item) => item.id)))}
             >
               {allSelected ? "Deselect All" : "Select All"}
             </button>
@@ -537,22 +800,27 @@ function BatchPanel(props: BatchPanelProps) {
         </div>
 
         <div className="batch-card-grid">
-          {props.items.map((item, index) => (
-            <button
-              className={`qr-tile ${props.selectedIds.has(item.id) ? "chosen" : ""} ${!item.validation.safe ? "blocked" : ""}`}
-              type="button"
-              key={item.id}
-              onClick={() => item.validation.safe && toggleItem(item.id)}
-              title={item.validation.warning ?? item.value}
-            >
-              <span className="tile-index">{index + 1}</span>
-              {props.qrMap[item.id] ? <img src={props.qrMap[item.id]} alt={`QR code ${index + 1}`} /> : <div className="tile-empty" />}
-              <span className="tile-text">
-                <span className="tile-label">{item.validation.safe ? item.value : item.validation.warning}</span>
-                <Copy size={16} />
-              </span>
-            </button>
-          ))}
+          {props.items.map((item, index) => {
+            const readiness = itemReadiness.get(item.id);
+            const ready = Boolean(readiness?.ready);
+
+            return (
+              <button
+                className={`qr-tile ${props.selectedIds.has(item.id) ? "chosen" : ""} ${!ready ? "blocked" : ""}`}
+                type="button"
+                key={item.id}
+                onClick={() => ready && toggleItem(item.id)}
+                title={readiness?.message ?? item.value}
+              >
+                <span className="tile-index">{index + 1}</span>
+                {props.qrMap[item.id] ? <img src={props.qrMap[item.id]} alt={`QR code ${index + 1}`} /> : <div className="tile-empty" />}
+                <span className="tile-text">
+                  <span className="tile-label">{ready ? item.value : readiness?.message}</span>
+                  <Copy size={16} />
+                </span>
+              </button>
+            );
+          })}
           {!props.items.length && <div className="empty-batch">Batch QR previews will appear here.</div>}
         </div>
 
@@ -571,7 +839,7 @@ function BatchPanel(props: BatchPanelProps) {
                 {nextFormat.toUpperCase()}
               </button>
             ))}
-            <button className="zip-button" type="button" onClick={props.onExportZip} disabled={!safeItems.length || props.busy}>
+            <button className="zip-button" type="button" onClick={props.onExportZip} disabled={!readyItems.length || props.busy}>
               <Download size={21} />
               Download ZIP
             </button>

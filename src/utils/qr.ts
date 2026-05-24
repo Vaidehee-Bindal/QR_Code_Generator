@@ -15,6 +15,37 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+function removeCheckerboardBackground(source: HTMLImageElement, size: number): HTMLCanvasElement {
+  const logoCanvas = document.createElement("canvas");
+  logoCanvas.width = size;
+  logoCanvas.height = size;
+  const logoContext = logoCanvas.getContext("2d", { willReadFrequently: true });
+
+  if (!logoContext) return logoCanvas;
+
+  logoContext.clearRect(0, 0, size, size);
+  logoContext.drawImage(source, 0, 0, size, size);
+
+  const imageData = logoContext.getImageData(0, 0, size, size);
+  const { data } = imageData;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index];
+    const green = data[index + 1];
+    const blue = data[index + 2];
+    const alpha = data[index + 3];
+    const isLightChecker = red > 220 && green > 220 && blue > 220;
+    const isGrayChecker = Math.abs(red - green) < 4 && Math.abs(green - blue) < 4 && red >= 185 && red <= 225;
+
+    if (alpha > 0 && (isLightChecker || isGrayChecker)) {
+      data[index + 3] = 0;
+    }
+  }
+
+  logoContext.putImageData(imageData, 0, 0);
+  return logoCanvas;
+}
+
 export async function generatePngDataUrl(
   value: string,
   options: QrOptions,
@@ -41,7 +72,7 @@ export async function generatePngDataUrl(
       context.beginPath();
       context.roundRect(x - 6, y - 6, logoSize + 12, logoSize + 12, radius);
       context.fill();
-      context.drawImage(image, x, y, logoSize, logoSize);
+      context.drawImage(removeCheckerboardBackground(image, logoSize), x, y, logoSize, logoSize);
     }
   }
 
@@ -134,7 +165,16 @@ export async function copyToClipboard(value: string): Promise<void> {
 
 export async function copyImageToClipboard(dataUrl: string): Promise<void> {
   const blob = await dataUrlToBlob(dataUrl);
-  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+  if ("ClipboardItem" in window && navigator.clipboard.write) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      return;
+    } catch {
+      // Fall back to copying the data URL when image clipboard writes are unavailable.
+    }
+  }
+
+  await navigator.clipboard.writeText(dataUrl);
 }
 
 export { safeFilename };

@@ -5,8 +5,14 @@ export const MAX_BATCH_ITEMS = 100;
 export const MAX_LOGO_BYTES = 1024 * 1024;
 
 const BLOCKED_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "file:"]);
-const TRUSTED_SCHEMES = new Set(["http:", "https:", "mailto:", "tel:"]);
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/svg+xml"]);
+const URL_PROTOCOL_ERROR = "URL must start with http or https";
+
+export interface QrReadiness {
+  ready: boolean;
+  validation: ValidationResult;
+  message: string | null;
+}
 
 export function trimToLimit(value: string, limit = MAX_INPUT_LENGTH): string {
   return value.slice(0, limit);
@@ -30,25 +36,23 @@ export function validateQrInput(rawValue: string): ValidationResult {
     };
   }
 
-  if (scheme && !TRUSTED_SCHEMES.has(`${scheme}:`)) {
+  if (scheme && scheme !== "http" && scheme !== "https") {
     return {
-      safe: true,
-      warning: "This uses an uncommon URL scheme. Verify it before sharing.",
+      safe: false,
+      warning: URL_PROTOCOL_ERROR,
       normalized
     };
   }
 
-  if (scheme && TRUSTED_SCHEMES.has(`${scheme}:`)) {
+  if (scheme === "http" || scheme === "https") {
     try {
-      if (scheme === "http" || scheme === "https") {
-        const parsed = new URL(normalized);
-        if (!parsed.hostname.includes(".")) {
-          return {
-            safe: true,
-            warning: "This URL has an unusual host. Confirm it is intentional.",
-            normalized
-          };
-        }
+      const parsed = new URL(normalized);
+      if (!parsed.hostname.includes(".")) {
+        return {
+          safe: true,
+          warning: "This URL has an unusual host. Confirm it is intentional.",
+          normalized
+        };
       }
       return { safe: true, warning: null, normalized };
     } catch {
@@ -62,13 +66,50 @@ export function validateQrInput(rawValue: string): ValidationResult {
 
   if (/^www\./i.test(normalized) || /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(normalized)) {
     return {
-      safe: true,
-      warning: "This looks like a URL without a protocol. Consider adding https://.",
+      safe: false,
+      warning: URL_PROTOCOL_ERROR,
       normalized
     };
   }
 
   return { safe: true, warning: null, normalized };
+}
+
+function isCompleteHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    const hostParts = parsed.hostname.split(".").filter(Boolean);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      hostParts.length >= 2 &&
+      hostParts[hostParts.length - 1].length >= 2
+    );
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeIncompleteUrl(value: string): boolean {
+  if (/^https?:\/\//i.test(value)) return !isCompleteHttpUrl(value);
+  return false;
+}
+
+export function getQrGenerationReadiness(rawValue: string): QrReadiness {
+  const validation = validateQrInput(rawValue);
+
+  if (!validation.safe) {
+    return { ready: false, validation, message: validation.warning };
+  }
+
+  if (looksLikeIncompleteUrl(validation.normalized)) {
+    return {
+      ready: false,
+      validation,
+      message: "Waiting for a complete URL before generating the QR code."
+    };
+  }
+
+  return { ready: Boolean(validation.normalized), validation, message: validation.warning };
 }
 
 export function parseBatchInput(rawValue: string): BatchItem[] {
@@ -82,6 +123,10 @@ export function parseBatchInput(rawValue: string): BatchItem[] {
       value,
       validation: validateQrInput(value)
     }));
+}
+
+export function getReadyBatchItems(items: BatchItem[]): BatchItem[] {
+  return items.filter((item) => item.validation.safe && getQrGenerationReadiness(item.value).ready);
 }
 
 export function safeFilename(value: string, fallback = "qr-code"): string {
